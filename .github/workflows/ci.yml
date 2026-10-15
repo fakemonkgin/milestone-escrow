@@ -40,6 +40,9 @@ jobs:
       - name: Typecheck indexer
         run: pnpm --filter @escrow/indexer exec tsc --noEmit
 
+      - name: Generate Next.js types
+        run: pnpm --filter @escrow/web exec next typegen
+
       - name: Typecheck web
         run: pnpm --filter @escrow/web exec tsc --noEmit
 
