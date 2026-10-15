@@ -1,0 +1,106 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm and Node
+        uses: pnpm/setup@v3
+        with:
+          version: 12.11.2
+          runtime: node@22
+          cache: true
+          require-lockfile: true
+
+      - name: Typecheck domain
+        run: pnpm --filter @escrow/domain exec tsc --noEmit
+
+      - name: Typecheck API
+        run: pnpm --filter @escrow/api exec tsc --noEmit
+
+      - name: Typecheck indexer
+        run: pnpm --filter @escrow/indexer exec tsc --noEmit
+
+      - name: Typecheck web
+        run: pnpm --filter @escrow/web exec tsc --noEmit
+
+      - name: Typecheck integration tests
+        run: pnpm --filter @escrow/integration typecheck
+
+  contracts:
+    name: Solidity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+
+      - name: Check formatting
+        working-directory: packages/contracts
+        run: forge fmt --check
+
+      - name: Build contracts
+        working-directory: packages/contracts
+        run: forge build
+
+      - name: Run contract tests
+        working-directory: packages/contracts
+        run: forge test -vvv
+
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build API image
+        run: |
+          docker build \
+            -f services/api/Dockerfile \
+            -t milestone-escrow-api:ci \
+            .
+
+      - name: Build indexer image
+        run: |
+          docker build \
+            -f services/indexer/Dockerfile \
+            -t milestone-escrow-indexer:ci \
+            .
+
+      - name: Build web image
+        run: |
+          docker build \
+            -f apps/web/Dockerfile \
+            -t milestone-escrow-web:ci \
+            .

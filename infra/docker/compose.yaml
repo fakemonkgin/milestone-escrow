@@ -1,0 +1,116 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+
+    environment:
+      POSTGRES_USER: escrow
+      POSTGRES_PASSWORD: escrow
+      POSTGRES_DB: escrow
+
+    ports:
+      - "127.0.0.1:5433:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U escrow -d escrow"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  migrate:
+    image: postgres:17-alpine
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    environment:
+      DATABASE_URL: postgresql://escrow:escrow@postgres:5432/escrow
+
+    volumes:
+      - ../../packages/db/migrations:/migrations:ro
+      - ../../packages/db/migrate.sh:/migrate.sh:ro
+
+    entrypoint:
+      [
+        "/bin/sh",
+        "/migrate.sh"
+      ]
+
+
+  api:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+
+    env_file:
+      - ../../services/api/.env.docker
+
+    ports:
+      - "127.0.0.1:3001:3001"
+
+    depends_on:
+      migrate:
+        condition:
+          service_completed_successfully
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:3001/health > /dev/null"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+    restart:
+      unless-stopped
+
+
+  indexer:
+    build:
+      context: ../..
+      dockerfile: services/indexer/Dockerfile
+
+    env_file:
+      - ../../services/indexer/.env.docker
+
+    depends_on:
+      migrate:
+        condition:
+          service_completed_successfully
+
+    restart:
+      unless-stopped
+
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+
+    env_file:
+      - ../../apps/web/.env.docker
+
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    restart:
+      unless-stopped
+
+
+volumes:
+  postgres_data:

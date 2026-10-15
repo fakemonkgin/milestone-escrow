@@ -1,0 +1,2 @@
+ALTER TABLE projects
+ADD COLUMN onchain_created BOOLEAN NOT NULL DEFAULT FALSE;

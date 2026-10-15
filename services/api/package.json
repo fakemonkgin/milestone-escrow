@@ -1,0 +1,22 @@
+{
+  "name": "@escrow/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file=.env watch src/server.ts"
+  },
+  "dependencies": {
+    "@escrow/domain": "workspace:^",
+    "@fastify/cookie": "^11.1.3",
+    "@fastify/cors": "^11.3.1",
+    "fastify": "^5.12.5",
+    "pg": "^8.23.1",
+    "viem": "^2.57.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15"
+  }
+}
