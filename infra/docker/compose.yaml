@@ -53,6 +53,9 @@ services:
     env_file:
       - ../../services/api/.env.docker
 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     ports:
       - "127.0.0.1:3001:3001"
 
@@ -84,6 +87,8 @@ services:
     env_file:
       - ../../services/indexer/.env.docker
 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       migrate:
         condition:

@@ -107,3 +107,229 @@ jobs:
             -f apps/web/Dockerfile \
             -t milestone-escrow-web:ci \
             .
+  e2e:
+    name: Full E2E
+    runs-on: ubuntu-latest
+
+    env:
+      ANVIL_PRIVATE_KEY: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+      ALICE_PRIVATE_KEY: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+      BOB_PRIVATE_KEY: 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup pnpm and Node
+        uses: pnpm/setup@v3
+        with:
+          version: 12.11.2
+          runtime: node@22
+          cache: true
+          require-lockfile: true
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+
+      - name: Start Anvil
+        run: |
+          anvil \
+            --host 0.0.0.0 \
+            --port 8545 \
+            --chain-id 31337 \
+            > /tmp/anvil.log 2>&1 &
+
+          for attempt in $(seq 1 30); do
+            if cast chain-id \
+              --rpc-url http://127.0.0.1:8545 \
+              > /dev/null 2>&1; then
+              echo "Anvil is ready."
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          echo "Anvil did not start."
+          cat /tmp/anvil.log
+          exit 1
+
+      - name: Deploy local contracts
+        working-directory: packages/contracts
+        run: |
+          forge script \
+            script/DeployLocal.s.sol:DeployLocal \
+            --rpc-url http://127.0.0.1:8545 \
+            --broadcast \
+            -vv \
+            | tee /tmp/deploy.log
+
+      - name: Read deployed addresses
+        run: |
+          TOKEN_ADDRESS="$(
+            sed -n \
+              's/.*MockUSDC:[[:space:]]*\(0x[0-9A-Fa-f]\{40\}\).*/\1/p' \
+              /tmp/deploy.log \
+              | head -1
+          )"
+
+          ESCROW_ADDRESS="$(
+            sed -n \
+              's/.*MilestoneEscrow:[[:space:]]*\(0x[0-9A-Fa-f]\{40\}\).*/\1/p' \
+              /tmp/deploy.log \
+              | head -1
+          )"
+
+          if [ -z "$TOKEN_ADDRESS" ]; then
+            echo "MockUSDC address was not found."
+            cat /tmp/deploy.log
+            exit 1
+          fi
+
+          if [ -z "$ESCROW_ADDRESS" ]; then
+            echo "MilestoneEscrow address was not found."
+            cat /tmp/deploy.log
+            exit 1
+          fi
+
+          echo "TOKEN_ADDRESS=$TOKEN_ADDRESS" \
+            >> "$GITHUB_ENV"
+
+          echo "ESCROW_ADDRESS=$ESCROW_ADDRESS" \
+            >> "$GITHUB_ENV"
+
+          echo "MockUSDC: $TOKEN_ADDRESS"
+          echo "MilestoneEscrow: $ESCROW_ADDRESS"
+
+      - name: Create API environment
+        run: |
+          cat > services/api/.env.docker <<EOF
+          HOST=0.0.0.0
+          PORT=3001
+
+          DATABASE_URL=postgresql://escrow:escrow@postgres:5432/escrow
+
+          CORS_ORIGIN=http://localhost:3000
+
+          RPC_URL=http://host.docker.internal:8545
+
+          CHAIN_ID=31337
+
+          SIWE_DOMAIN=localhost:3000
+          SIWE_URI=http://localhost:3000
+
+          AUTH_NONCE_TTL_SECONDS=600
+          SESSION_TTL_SECONDS=86400
+          EOF
+
+      - name: Create indexer environment
+        run: |
+          cat > services/indexer/.env.docker <<EOF
+          DATABASE_URL=postgresql://escrow:escrow@postgres:5432/escrow
+
+          RPC_URL=http://host.docker.internal:8545
+
+          ESCROW_ADDRESS=${ESCROW_ADDRESS}
+
+          ESCROW_DEPLOYMENT_BLOCK=1
+
+          INDEXER_BLOCK_TAG=latest
+          EOF
+
+      - name: Create integration environment
+        run: |
+          cat > tests/integration/.env <<EOF
+          API_URL=http://localhost:3001
+
+          RPC_URL=http://127.0.0.1:8545
+
+          CHAIN_ID=31337
+
+          SIWE_DOMAIN=localhost:3000
+          SIWE_URI=http://localhost:3000
+
+          ESCROW_ADDRESS=${ESCROW_ADDRESS}
+          TOKEN_ADDRESS=${TOKEN_ADDRESS}
+
+          ALICE_PRIVATE_KEY=${ALICE_PRIVATE_KEY}
+          BOB_PRIVATE_KEY=${BOB_PRIVATE_KEY}
+          EOF
+
+      - name: Start backend services
+        run: |
+          docker compose \
+            -f infra/docker/compose.yaml \
+            up \
+            -d \
+            --build \
+            postgres \
+            migrate \
+            api \
+            indexer
+
+      - name: Wait for API
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl \
+              --fail \
+              --silent \
+              http://127.0.0.1:3001/health \
+              > /dev/null; then
+
+              echo "API is ready."
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          echo "API did not become healthy."
+
+          docker compose \
+            -f infra/docker/compose.yaml \
+            logs \
+            --no-color \
+            api \
+            indexer \
+            postgres \
+            migrate
+
+          exit 1
+
+      - name: Run full integration test
+        run: |
+          pnpm \
+            --filter @escrow/integration \
+            test
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo "===== Anvil ====="
+          cat /tmp/anvil.log || true
+
+          echo "===== Docker services ====="
+          docker compose \
+            -f infra/docker/compose.yaml \
+            logs \
+            --no-color \
+            api \
+            indexer \
+            postgres \
+            migrate \
+            || true
+
+      - name: Stop services
+        if: always()
+        run: |
+          docker compose \
+            -f infra/docker/compose.yaml \
+            down \
+            -v \
+            --remove-orphans \
+            || true
