@@ -31,8 +31,8 @@ jobs:
           cache: true
           require-lockfile: true
 
-      - name: Typecheck domain
-        run: pnpm --filter @escrow/domain exec tsc --noEmit
+      - name: Build domain
+        run: pnpm --filter @escrow/domain exec tsc
 
       - name: Typecheck API
         run: pnpm --filter @escrow/api exec tsc --noEmit
