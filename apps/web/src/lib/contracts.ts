@@ -8,6 +8,8 @@ export const milestoneEscrowAbi =
     "function createProject(bytes32 projectId, address freelancer, address token, uint256[] milestoneAmounts)",
     "function fundProject(bytes32 projectId)",
     "function releaseMilestone(bytes32 projectId, uint256 milestoneIndex)",
+    "function getProject(bytes32 projectId) view returns (address client, address freelancer, address token, uint256 totalAmount, uint256 releasedCount, bool funded, uint256 milestoneCount)",
+    "function getMilestone(bytes32 projectId, uint256 milestoneIndex) view returns (uint256 amount, bool released)",
   ]);
 
 export const erc20Abi =

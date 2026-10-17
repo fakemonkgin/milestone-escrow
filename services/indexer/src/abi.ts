@@ -8,3 +8,9 @@ export const milestoneEscrowAbi =
 
     "event MilestoneReleased(bytes32 indexed projectId, uint256 indexed milestoneIndex, address indexed freelancer, uint256 amount)",
   ]);
+
+  export const projectReadAbi = parseAbi([
+  "function getProject(bytes32 projectId) view returns (address client, address freelancer, address token, uint256 totalAmount, uint256 releasedCount, bool funded, uint256 milestoneCount)",
+
+  "function getMilestone(bytes32 projectId, uint256 milestoneIndex) view returns (uint256 amount, bool released)",
+]);

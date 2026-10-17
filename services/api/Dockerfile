@@ -1,6 +1,6 @@
 FROM node:22-alpine
 
-RUN corepack enable
+RUN npm install --global pnpm@12.11.2
 
 WORKDIR /app
 

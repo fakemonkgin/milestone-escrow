@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "typecheck": "pnpm --filter @escrow/domain build && pnpm --filter @escrow/api exec tsc --noEmit && pnpm --filter @escrow/indexer exec tsc --noEmit && pnpm --filter @escrow/web exec next typegen && pnpm --filter @escrow/web exec tsc --noEmit && pnpm --filter @escrow/integration typecheck",
+    "test:contracts": "forge test --root packages/contracts -vv",
+    "test:integration": "pnpm --filter @escrow/integration test",
+    "check": "pnpm run typecheck && pnpm run test:contracts",
+    "test": "pnpm run test:contracts && pnpm run test:integration"
   },
   "keywords": [],
   "author": "",

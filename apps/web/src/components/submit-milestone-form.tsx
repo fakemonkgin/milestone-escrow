@@ -203,7 +203,7 @@ export function SubmitMilestoneForm({
       }
 
       const updatedProject: CreatedProject = await response.json()
-          
+
       onProjectUpdated(
         updatedProject
       );
@@ -225,14 +225,19 @@ export function SubmitMilestoneForm({
   }
 
   return (
-    <form
-      onSubmit={
-        handleSubmit
-      }
-    >
-      <h4>
-        Submit Milestone
+  <form
+    onSubmit={handleSubmit}
+    className="space-y-4 rounded-xl border border-slate-200 bg-white p-5"
+  >
+    <div>
+      <h4 className="text-base font-semibold text-slate-900">
+        Submit Deliverables
       </h4>
+
+      <p className="mt-1 text-sm leading-6 text-slate-500">
+        Share your completed work with the client for review.
+      </p>
+    </div>
 
       <div>
         <label
@@ -244,22 +249,14 @@ export function SubmitMilestoneForm({
         </label>
 
         <textarea
-          id={
-            `submission-note-${milestone.index}`
-          }
-          value={
-            submissionNote
-          }
-          disabled={
-            submitting
-          }
-          onChange={(
-            event
-          ) =>
-            setSubmissionNote(
-              event.target.value
-            )
-          }
+          id={`submission-note-${milestone.index}`}
+          value={submissionNote}
+          onChange={(event) => setSubmissionNote(event.target.value)}
+          disabled={submitting}
+          required
+          rows={4}
+          placeholder="Describe what you delivered and what the client should review..."
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:opacity-60"
         />
       </div>
 
@@ -273,42 +270,29 @@ export function SubmitMilestoneForm({
         </label>
 
         <input
-          id={
-            `submission-url-${milestone.index}`
-          }
-          type="url"
-          value={
-            submissionUrl
-          }
-          disabled={
-            submitting
-          }
-          placeholder="https://..."
-          onChange={(
-            event
-          ) =>
-            setSubmissionUrl(
-              event.target.value
-            )
-          }
-        />
+            id={`submission-url-${milestone.index}`}
+            type="url"
+            value={submissionUrl}
+            onChange={(event) => setSubmissionUrl(event.target.value)}
+            disabled={submitting}
+            required
+            placeholder="https://github.com/your-project"
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:opacity-60"
+          />
       </div>
 
       <button
-        type="submit"
-        disabled={
-          submitting
-        }
-      >
-        {submitting
-          ? "Submitting..."
-          : "Submit Milestone"}
+          type="submit"
+          disabled={submitting}
+          className="w-full rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
+          {submitting ? "Submitting..." : "Submit for Review"}
       </button>
 
       {errorMessage && (
-        <p>
-          Error:
-          {" "}
+        <p
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+        >
           {errorMessage}
         </p>
       )}

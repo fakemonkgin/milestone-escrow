@@ -10,6 +10,8 @@ import {
   useSignMessage,
 } from "wagmi";
 
+import { foundry } from "wagmi/chains";
+
 import {
   createSiweMessage,
 } from "viem/siwe";
@@ -17,7 +19,6 @@ import {
 
 type SessionResponse = {
   authenticated: boolean;
-
   address?:
     `0x${string}`;
 };
@@ -85,13 +86,15 @@ export function SiweAuth() {
       }
 
       const session:SessionResponse = await response.json()
-          
+
       if (cancelled) {
         return;
       }
 
-      setSessionAddress(
-        session.address ?? null
+     setSessionAddress(
+        session.authenticated
+          ? (session.address ?? null)
+          : null
       );
     } catch {
       if (!cancelled) {
@@ -104,6 +107,22 @@ export function SiweAuth() {
     cancelled = true;
   };
 }, [apiUrl]);
+
+  const walletAddress = connection.address;
+
+const isAuthenticatedWallet =
+  Boolean(
+    walletAddress &&
+    sessionAddress &&
+    walletAddress.toLowerCase() ===
+      sessionAddress.toLowerCase()
+  );
+
+const isSessionMismatch =
+  Boolean(
+    sessionAddress &&
+    !isAuthenticatedWallet
+  );
 
 
   async function signIn():
@@ -118,20 +137,25 @@ export function SiweAuth() {
       return;
     }
 
-    if (
-      !connection.address ||
-      connection.chainId ===
-        undefined
-    ) {
-      setErrorMessage(
-        "Connect your wallet first."
-      );
+   const signingAddress = connection.address;
+    const signingConnector = connection.connector;
 
+    if (!signingAddress || !signingConnector) {
+      setErrorMessage("Connect your wallet first.");
       return;
     }
 
     try {
       setLoading(true);
+      const walletChainId =
+      await signingConnector.getChainId();
+
+    if (walletChainId !== foundry.id) {
+      throw new Error(
+        `Wrong wallet network: ${walletChainId}. ` +
+        `Please switch to Anvil Local (${foundry.id}).`
+      );
+    }
 
       const nonceResponse =
         await fetch(
@@ -162,10 +186,9 @@ export function SiweAuth() {
       const message =
         createSiweMessage({
           address:
-            connection.address,
+            signingAddress,
 
-          chainId:
-            connection.chainId,
+          chainId:walletChainId,
 
           domain:
             window.location.host,
@@ -269,76 +292,123 @@ export function SiweAuth() {
   }
 
 
-  async function logout():
-    Promise<void> {
-    if (!apiUrl) {
-      return;
-    }
+  async function logout(): Promise<void> {
+  setErrorMessage(null);
 
-    await fetch(
+  if (!apiUrl) {
+    setErrorMessage("API URL is not configured.");
+    return;
+  }
+
+  try {
+    setLoading(true);
+
+    const response = await fetch(
       `${apiUrl}/auth/logout`,
       {
-        method:
-          "POST",
-
-        credentials:
-          "include",
+        method: "POST",
+        credentials: "include",
       }
     );
 
-    setSessionAddress(
-      null
+    if (!response.ok) {
+      throw new Error("Failed to sign out.");
+    }
+
+    setSessionAddress(null);
+  } catch (error) {
+    setErrorMessage(
+      error instanceof Error
+        ? error.message
+        : "Sign-out failed."
     );
+  } finally {
+    setLoading(false);
   }
+}
 
 
-  return (
-    <section>
-      <h2>
-        Authentication
-      </h2>
+ return (
+  <section className="space-y-4">
+    <p className="text-sm text-slate-500">
+      Sign a message to verify wallet ownership.
+      No gas fee is required.
+    </p>
 
-      {sessionAddress ? (
-        <>
-          <p>
-            Signed in as:
-            {" "}
-            {sessionAddress}
-          </p>
+    {isSessionMismatch ? (
+      <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <p
+          role="alert"
+          className="text-sm font-semibold text-amber-800"
+        >
+          Wallet and session do not match.
+        </p>
 
-          <button
-            type="button"
-            onClick={() => {
-              void logout();
-            }}
-          >
-            Sign Out
-          </button>
-        </>
-      ) : (
+        <p className="break-all text-xs text-amber-800">
+          Session: {sessionAddress}
+        </p>
+
+        <p className="break-all text-xs text-amber-800">
+          Wallet: {walletAddress ?? "Not connected"}
+        </p>
+
         <button
           type="button"
-          disabled={
-            loading ||
-            !connection.address
-          }
-          onClick={() => {
-            void signIn();
-          }}
+          disabled={loading}
+          onClick={() => void logout()}
+          className="w-full rounded-xl bg-amber-600 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+        >
+          {loading ? "Signing out..." : "Sign Out Old Session"}
+        </button>
+      </div>
+    ) : isAuthenticatedWallet ? (
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-emerald-700">
+          ✓ Authenticated
+        </p>
+
+        <p className="break-all font-mono text-xs text-slate-500">
+          {sessionAddress}
+        </p>
+
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void logout()}
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+        >
+          {loading ? "Signing out..." : "Sign Out"}
+        </button>
+      </div>
+    ) : (
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">
+          {walletAddress
+            ? "Wallet connected. Authentication required."
+            : "Connect your wallet first."}
+        </p>
+
+        <button
+          type="button"
+          disabled={loading || !walletAddress}
+          onClick={() => void signIn()}
+          className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {loading
-            ? "Check wallet..."
+            ? "Waiting for signature..."
             : "Sign in with Ethereum"}
         </button>
-      )}
+      </div>
+    )}
 
-      {errorMessage && (
-        <p>
-          Error:
-          {" "}
-          {errorMessage}
-        </p>
-      )}
-    </section>
-  );
+    {errorMessage && (
+      <p
+        role="alert"
+        className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+      >
+        {errorMessage}
+      </p>
+    )}
+  </section>
+);
 }

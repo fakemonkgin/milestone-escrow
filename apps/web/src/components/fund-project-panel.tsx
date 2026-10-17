@@ -35,6 +35,7 @@ type FundingStatus =
   | "AWAITING_FUND"
   | "CONFIRMING_FUND"
   | "SYNCING"
+  | "SYNC_DELAYED"
   | "ACTIVE"
   | "FAILED";
 
@@ -158,6 +159,18 @@ export function FundProjectPanel({
       },
     });
 
+  const onchainProjectQuery = useReadContract({
+  address: ESCROW_ADDRESS,
+  abi: milestoneEscrowAbi,
+  functionName: "getProject",
+  args: [project.id],
+  query: {
+    refetchInterval: 5000,
+  },
+});
+
+const alreadyFundedOnChain = onchainProjectQuery.data?.[5] === true;
+
   const allowance =
     allowanceQuery.data ??
     0n;
@@ -280,6 +293,18 @@ export function FundProjectPanel({
     }
 
     try {
+      const onchainProject = await publicClient.readContract({
+        address: ESCROW_ADDRESS,
+        abi: milestoneEscrowAbi,
+        functionName: "getProject",
+        args: [project.id],
+      });
+
+      if (onchainProject[5]) {
+        setFundingStatus("SYNC_DELAYED");
+        return;
+      }
+
       if (needsApproval) {
         setFundingStatus(
           "AWAITING_APPROVE"
@@ -374,24 +399,30 @@ export function FundProjectPanel({
         );
       }
 
-      await Promise.all([
+      setFundingStatus("SYNCING");
+
+      // 查询余额只用于刷新显示，不能影响已成功的付款结果
+      void Promise.allSettled([
         allowanceQuery.refetch(),
         balanceQuery.refetch(),
+        onchainProjectQuery.refetch(),
       ]);
 
-      setFundingStatus(
-        "SYNCING"
-      );
+      try {
+        const updatedProject = await waitForActive();
 
-       const updatedProject = await waitForActive();
+        onProjectUpdated(updatedProject);
 
-        onProjectUpdated(
-          updatedProject
+        setFundingStatus("ACTIVE");
+      } catch (syncError) {
+        console.warn(
+          "Funding is confirmed on-chain, but project sync is pending:",
+          syncError
         );
 
-        setFundingStatus(
-          "ACTIVE"
-        );
+        setFundingStatus("SYNC_DELAYED");
+      }
+
     } catch (error) {
       setFundingStatus(
         "FAILED"
@@ -411,6 +442,48 @@ export function FundProjectPanel({
     }
   }
 
+  async function handleCheckSync(): Promise<void> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+  if (!apiUrl) {
+    setErrorMessage("API URL is not configured.");
+    return;
+  }
+
+  setErrorMessage(null);
+  setFundingStatus("SYNCING");
+
+  try {
+    const response = await fetch(
+      `${apiUrl}/projects/${project.id}`,
+      { cache: "no-store" }
+    );
+
+    if (!response.ok) {
+      throw new Error("Unable to refresh project status.");
+    }
+
+    const latestProject: CreatedProject =
+      await response.json();
+
+    if (
+      latestProject.status === "ACTIVE" ||
+      latestProject.status === "COMPLETED"
+    ) {
+      onProjectUpdated(latestProject);
+      setFundingStatus("ACTIVE");
+    } else {
+      setFundingStatus("SYNC_DELAYED");
+    }
+  } catch {
+    setFundingStatus("SYNC_DELAYED");
+    setErrorMessage(
+      "Unable to refresh project status. Do not submit another deposit."
+    );
+  }
+}
+
+
   const isBusy =
     fundingStatus ===
       "AWAITING_APPROVE" ||
@@ -423,61 +496,67 @@ export function FundProjectPanel({
     fundingStatus ===
       "SYNCING";
 
-  return (
-    <section>
-      <h2>
+
+    return (
+  <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+
+    <div>
+      <h2 className="text-xl font-semibold text-slate-900">
         Fund Project
       </h2>
 
-      <p>
-        Required:
-        {" "}
-        {formatUnits(
-          requiredAmount,
-          6
-        )}
-        {" "}
-        USDC
+      <p className="mt-2 text-sm text-slate-500">
+        Deposit the full project budget into escrow
+        before milestone payments begin.
+      </p>
+    </div>
+
+    <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-5">
+      <p className="text-sm font-medium text-slate-600">
+        Total escrow deposit
       </p>
 
-      <p>
-        Wallet balance:
-        {" "}
-        {formatUnits(
-          balance,
-          6
-        )}
-        {" "}
-        USDC
+      <p className="mt-2 text-3xl font-bold text-slate-900">
+        {formatUnits(requiredAmount, 6)}
+        <span className="ml-2 text-base font-medium text-slate-500">
+          USDC
+        </span>
       </p>
 
-      <p>
-        Escrow allowance:
-        {" "}
-        {formatUnits(
-          allowance,
-          6
-        )}
-        {" "}
-        USDC
+      <p className="mt-3 text-sm leading-6 text-slate-600">
+        Covers all {project.milestones.length} milestones.
+        Funds are held in escrow and released separately
+        after each milestone is approved.
       </p>
+    </div>
 
-      <p>
-        Approval required:
-        {" "}
-        {needsApproval
-          ? "Yes"
-          : "No"}
+    {balanceQuery.isSuccess && balance < requiredAmount && (
+      <p
+        role="alert"
+        className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+      >
+        Insufficient USDC balance to fund this project.
       </p>
+    )}
 
-      <button
-        type="button"
-        disabled={
-          isBusy ||
-          !connection.address ||
-          fundingStatus ===
-            "ACTIVE"
-        }
+    <p className="text-sm leading-6 text-slate-500">
+      Your wallet may request an approval transaction
+      before confirming the deposit.
+    </p>
+
+        <button
+      type="button"
+      className="w-full rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={
+        isBusy ||
+        !connection.address ||
+        !onchainProjectQuery.isSuccess ||
+        alreadyFundedOnChain ||
+        fundingStatus === "SYNC_DELAYED" ||
+        Boolean(fundHash) ||
+        (balanceQuery.isSuccess && balance < requiredAmount) ||
+        fundingStatus === "ACTIVE"
+      }
         onClick={() => {
           void handleFund();
         }}
@@ -500,41 +579,77 @@ export function FundProjectPanel({
                   : fundingStatus ===
                       "ACTIVE"
                     ? "Project Funded"
-                    : needsApproval
-                      ? "Approve & Fund"
-                      : "Fund Project"}
+                    : `Deposit ${formatUnits(requiredAmount, 6)} USDC`}
       </button>
 
+      {(
+  fundingStatus === "SYNC_DELAYED" ||
+  (
+    alreadyFundedOnChain &&
+    project.status === "AWAITING_FUNDING"
+  )
+) && (
+  <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+    <p className="text-sm font-medium text-amber-900">
+      Your deposit has been recorded on-chain.
+      Project data is still synchronizing.
+    </p>
+
+    <p className="text-sm text-amber-800">
+      Do not deposit again.
+      You can safely refresh the project status.
+    </p>
+
+    <button
+      type="button"
+      disabled={isBusy}
+      onClick={() => void handleCheckSync()}
+      className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+    >
+      Refresh Project Status
+    </button>
+  </div>
+)}
+
+      {(approveHash || fundHash) && (
+  <details className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+    <summary className="cursor-pointer text-sm font-medium text-slate-700">
+      Transaction Details
+    </summary>
+
+    <div className="mt-3 space-y-3">
       {approveHash && (
-        <p>
-          Approve transaction:
-          {" "}
-          {approveHash}
+        <p className="break-all text-xs text-slate-600">
+          Approval transaction: {approveHash}
         </p>
       )}
 
       {fundHash && (
-        <p>
-          Funding transaction:
-          {" "}
-          {fundHash}
+        <p className="break-all text-xs text-slate-600">
+          Deposit transaction: {fundHash}
         </p>
       )}
+    </div>
+  </details>
+)}
 
-      {fundingStatus ===
-        "ACTIVE" && (
-        <p>
-          Project is ACTIVE.
-        </p>
-      )}
+{fundingStatus === "ACTIVE" && (
+  <p
+    role="status"
+    className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-800"
+  >
+    Funds successfully deposited into escrow.
+  </p>
+)}
 
-      {errorMessage && (
-        <p>
-          Error:
-          {" "}
-          {errorMessage}
-        </p>
-      )}
+{errorMessage && (
+  <p
+    role="alert"
+    className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+  >
+    {errorMessage}
+  </p>
+)}
     </section>
   );
 }

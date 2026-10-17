@@ -8,6 +8,8 @@ import {pool} from "./db.js";
 
 import {milestoneEscrowAbi} from "./abi.js";
 
+import { projectMismatch } from "./project-validation.js";
+
 const escrowAddressValue =
   process.env.ESCROW_ADDRESS;
 
@@ -273,6 +275,43 @@ async function processBlockRange({
         continue;
       }
 
+      const { projectId } = log.args;
+
+if (projectId === undefined) {
+  throw new Error(
+    "Escrow log is missing projectId"
+  );
+}
+
+const rejectionReason = await projectMismatch(
+  client,
+  escrowAddress,
+  projectId,
+  log.blockNumber,
+  log.eventName !== "ProjectCreated"
+);
+
+if (rejectionReason !== null) {
+  await client.query(
+    `
+    UPDATE processed_logs
+    SET rejection_reason = $4
+    WHERE
+      chain_id = $1
+      AND transaction_hash = $2
+      AND log_index = $3
+    `,
+    [
+      chainId,
+      log.transactionHash,
+      log.logIndex,
+      rejectionReason,
+    ]
+  );
+
+  continue;
+}
+
     switch (log.eventName) {
         case "ProjectCreated": {
             const { projectId } = log.args;
@@ -380,6 +419,21 @@ async function syncToFinalized(): Promise<void> {
       chainId,
       escrowAddress
     );
+
+  const latestBlockNumber =
+  await publicClient.getBlockNumber();
+
+  if (
+    lastProcessedBlock !== null &&
+    lastProcessedBlock > latestBlockNumber
+  ) {
+    throw new Error(
+      `Indexer cursor is ahead of chain head: ` +
+      `cursor=${lastProcessedBlock}, ` +
+      `latest=${latestBlockNumber}. ` +
+      `Check whether Anvil has been reset.`
+    );
+  }
 
   let fromBlock =
     lastProcessedBlock === null

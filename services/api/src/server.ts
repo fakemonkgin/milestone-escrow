@@ -514,6 +514,13 @@ async function submitMilestone({
         AND m.status = 'PENDING'
         AND p.id = m.project_id
         AND p.status = 'ACTIVE'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM milestones AS previous
+          WHERE previous.project_id = m.project_id
+            AND previous.milestone_index < m.milestone_index
+            AND previous.status <> 'PAID'
+        )
       `,
       [
         projectId,
@@ -538,6 +545,58 @@ app.get("/health", async () => {
   return {
     status: "ok",
     database: result.rows[0]?.database_ok,
+  };
+});
+
+app.get("/my/projects", async (request, reply) => {
+  const address = await getSessionAddress(
+    request.cookies[SESSION_COOKIE_NAME]
+  );
+
+  if (!address) {
+    return reply.code(401).send({
+      error: "authentication required",
+    });
+  }
+
+  const result = await pool.query<{
+    id: string;
+    title: string;
+    status: string;
+    milestoneCount: number;
+    role: "CLIENT" | "FREELANCER";
+  }>(
+    `
+    SELECT
+      p.id,
+      p.title,
+      p.status,
+
+      (
+        SELECT COUNT(*)::int
+        FROM milestones AS m
+        WHERE m.project_id = p.id
+      ) AS "milestoneCount",
+
+      CASE
+        WHEN lower(p.client_address) = lower($1)
+          THEN 'CLIENT'
+        ELSE 'FREELANCER'
+      END AS "role"
+
+    FROM projects AS p
+    WHERE
+      lower(p.client_address) = lower($1)
+      OR lower(p.freelancer_address) = lower($1)
+
+    ORDER BY p.created_at DESC
+    LIMIT 50
+    `,
+    [address]
+  );
+
+  return {
+    projects: result.rows,
   };
 });
 

@@ -31,23 +31,8 @@ jobs:
           cache: true
           require-lockfile: true
 
-      - name: Build domain
-        run: pnpm --filter @escrow/domain exec tsc
-
-      - name: Typecheck API
-        run: pnpm --filter @escrow/api exec tsc --noEmit
-
-      - name: Typecheck indexer
-        run: pnpm --filter @escrow/indexer exec tsc --noEmit
-
-      - name: Generate Next.js types
-        run: pnpm --filter @escrow/web exec next typegen
-
-      - name: Typecheck web
-        run: pnpm --filter @escrow/web exec tsc --noEmit
-
-      - name: Typecheck integration tests
-        run: pnpm --filter @escrow/integration typecheck
+      - name: Typecheck workspace
+        run: pnpm run typecheck
 
   contracts:
     name: Solidity
@@ -64,6 +49,13 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.8.5
+
+      - name: Create local contract environment
+        working-directory: packages/contracts
+        run: |
+          cat > .env <<'EOF'
+          RPC_URL=http://127.0.0.1:8545
+          EOF
 
       - name: Check formatting
         working-directory: packages/contracts
@@ -135,6 +127,13 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.8.5
+
+      - name: Create local contract environment
+        working-directory: packages/contracts
+        run: |
+          cat > .env <<'EOF'
+          RPC_URL=http://127.0.0.1:8545
+          EOF
 
       - name: Start Anvil
         run: |
@@ -233,6 +232,7 @@ jobs:
           DATABASE_URL=postgresql://escrow:escrow@postgres:5432/escrow
 
           RPC_URL=http://host.docker.internal:8545
+          CHAIN_ID=31337
 
           ESCROW_ADDRESS=${ESCROW_ADDRESS}
 
@@ -260,6 +260,16 @@ jobs:
           BOB_PRIVATE_KEY=${BOB_PRIVATE_KEY}
           EOF
 
+      - name: Create web environment
+        run: |
+          cat > apps/web/.env.docker <<EOF
+          NEXT_PUBLIC_API_URL=http://localhost:3001
+          NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8545
+          NEXT_PUBLIC_CHAIN_ID=31337
+          NEXT_PUBLIC_ESCROW_ADDRESS=${ESCROW_ADDRESS}
+          NEXT_PUBLIC_TOKEN_ADDRESS=${TOKEN_ADDRESS}
+          EOF
+
       - name: Start backend services
         run: |
           docker compose \
@@ -270,7 +280,8 @@ jobs:
             postgres \
             migrate \
             api \
-            indexer
+            indexer \
+            web
 
       - name: Wait for API
         run: |
@@ -299,6 +310,18 @@ jobs:
             postgres \
             migrate
 
+          exit 1
+
+      - name: Wait for web
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --max-time 5 http://127.0.0.1:3000/ > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker compose -f infra/docker/compose.yaml logs --no-color web
           exit 1
 
       - name: Run full integration test
